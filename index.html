@@ -1,0 +1,259 @@
+<html>
+<head>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <style>
+        @keyframes waveBackground {
+            0% {
+                background-position: 0% 50%;
+            }
+            50% {
+                background-position: 100% 50%;
+            }
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        body {
+            background: linear-gradient(to right, #f0e68c, #ff69b4);
+            background-size: 200% 200%;
+            animation: waveBackground 20s linear infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between">
+    <!-- Header -->
+    <div class="w-[800px] mt-5 flex justify-between items-center bg-gray-800 p-4 rounded-[30px]">
+        <div class="bg-white rounded-full px-4 py-2">
+            <span class="text-black font-bold text-xl">WIB</span>
+        </div>
+        <div class="relative">
+            <input type="text" placeholder="search" class="rounded-full px-4 py-2 bg-gradient-to-r from-yellow-200 to-pink-300 text-black font-bold">
+            <i class="fas fa-search absolute right-3 top-1/2 transform -translate-y-1/2 text-black"></i>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-grow flex items-center justify-center">
+        <div class="flex items-center space-x-4">
+            <!-- User Webcam Card -->
+            <div class="relative bg-red-600 w-[358px] h-[448px] rounded-lg flex items-end justify-end p-2">
+                <video id="user-webcam" class="absolute inset-0 w-full h-full object-cover rounded-lg" autoplay></video>
+                <div class="absolute top-2 left-2 bg-black w-8 h-8 rounded-full"></div>
+                <div class="flex space-x-2">
+                    <button id="microphone-toggle" class="bg-white p-2 rounded-full bg-opacity-50 backdrop-filter backdrop-blur-lg" onclick="toggleMicrophone()">
+                        <i id="microphone-icon" class="fas fa-microphone-slash text-black"></i>
+                    </button>
+                    <button id="webcam-toggle" class="bg-white p-2 rounded-full bg-opacity-50 backdrop-filter backdrop-blur-lg" onclick="toggleWebcam()">
+                        <i id="webcam-icon" class="fas fa-video-slash text-black"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Middle Arrow -->
+            <div class="flex space-x-2">
+                <button id="up-button" class="bg-white p-2 rounded-full">
+                    <i class="fas fa-chevron-up text-black"></i>
+                </button>
+                <button id="down-button" class="bg-white p-2 rounded-full">
+                    <i class="fas fa-chevron-down text-black"></i>
+                </button>
+            </div>
+
+            <!-- Other Side Webcam Card -->
+            <div class="relative bg-red-600 w-[358px] h-[448px] rounded-lg p-2">
+                <video id="other-webcam" class="absolute inset-0 w-full h-full object-cover rounded-lg" autoplay></video>
+                <div class="absolute top-2 left-2 bg-black w-8 h-8 rounded-full"></div>
+                <div class="absolute top-2 right-2">
+                    <button class="bg-black text-white px-4 py-1 rounded-full">Follow</button>
+                </div>
+                <div class="absolute bottom-2 right-2">
+                    <button id="like-button" class="bg-white p-2 rounded-full bg-opacity-50 backdrop-filter backdrop-blur-lg">
+                        <i class="fas fa-heart text-black text-2xl"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="w-[300px] mb-5 flex justify-around items-center bg-gray-800 p-4 rounded-[30px]">
+        <button class="bg-gray-200 p-2 rounded-full">
+            <i class="fas fa-bell text-black"></i>
+        </button>
+        <button class="bg-gradient-to-r from-pink-500 to-purple-500 p-2 rounded-full">
+            <i class="fas fa-video text-white"></i>
+        </button>
+        <button class="bg-gray-200 p-2 rounded-full">
+            <i class="fas fa-user text-black"></i>
+        </button>
+    </div>
+
+    <script>
+ let microphoneOn = false;
+let webcamOn = false;
+let localStream;
+let peerConnection;
+const signalingServerUrl = "ws://localhost:8080"; // Replace with your signaling server URL
+const signalingSocket = new WebSocket(signalingServerUrl);
+
+// STUN server configuration for WebRTC
+const configuration = {
+    iceServers: [
+        { urls: "stun:stun.l.google.com:19302" } // Public STUN server
+    ]
+};
+
+// Handle incoming messages from the signaling server
+signalingSocket.onmessage = async (message) => {
+    const data = JSON.parse(message.data);
+
+    if (data.type === "offer") {
+        await handleOffer(data.offer);
+    } else if (data.type === "answer") {
+        await handleAnswer(data.answer);
+    } else if (data.type === "candidate") {
+        await handleCandidate(data.candidate);
+    }
+};
+
+// Toggle microphone functionality
+function toggleMicrophone() {
+    microphoneOn = !microphoneOn;
+    const microphoneIcon = document.getElementById('microphone-icon');
+    if (microphoneOn) {
+        microphoneIcon.classList.remove('fa-microphone-slash');
+        microphoneIcon.classList.add('fa-microphone');
+        localStream.getAudioTracks().forEach(track => track.enabled = true); // Enable audio track
+    } else {
+        microphoneIcon.classList.remove('fa-microphone');
+        microphoneIcon.classList.add('fa-microphone-slash');
+        localStream.getAudioTracks().forEach(track => track.enabled = false); // Disable audio track
+    }
+}
+
+// Toggle webcam functionality
+function toggleWebcam() {
+    webcamOn = !webcamOn;
+    const webcamIcon = document.getElementById('webcam-icon');
+    const userWebcam = document.getElementById('user-webcam');
+    if (webcamOn) {
+        webcamIcon.classList.remove('fa-video-slash');
+        webcamIcon.classList.add('fa-video');
+        startWebcam(userWebcam);
+    } else {
+        webcamIcon.classList.remove('fa-video');
+        webcamIcon.classList.add('fa-video-slash');
+        stopWebcam(userWebcam);
+    }
+}
+
+// Start the local webcam
+async function startWebcam(videoElement) {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        videoElement.srcObject = localStream;
+    } catch (error) {
+        console.error('Error accessing webcam or microphone:', error);
+        alert('Could not access webcam or microphone. Please check your permissions and try again.');
+    }
+}
+
+// Stop the local webcam
+function stopWebcam(videoElement) {
+    const stream = videoElement.srcObject;
+    if (stream) {
+        const tracks = stream.getTracks();
+        tracks.forEach(track => track.stop());
+        videoElement.srcObject = null;
+    }
+}
+
+// Create a new WebRTC peer connection
+function createPeerConnection() {
+    peerConnection = new RTCPeerConnection(configuration);
+
+    // Add local stream tracks to the peer connection
+    localStream.getTracks().forEach((track) => {
+        peerConnection.addTrack(track, localStream);
+    });
+
+    // Handle remote stream
+    peerConnection.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        const otherWebcam = document.getElementById('other-webcam');
+        otherWebcam.srcObject = remoteStream;
+    };
+
+    // Send ICE candidates to the signaling server
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            signalingSocket.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
+        }
+    };
+}
+
+// Handle incoming offer
+async function handleOffer(offer) {
+    createPeerConnection();
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    signalingSocket.send(JSON.stringify({ type: "answer", answer }));
+}
+
+// Handle incoming answer
+async function handleAnswer(answer) {
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+}
+
+// Handle incoming ICE candidate
+async function handleCandidate(candidate) {
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+}
+
+// Start a random video call
+async function randomVideoCall() {
+    createPeerConnection();
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    signalingSocket.send(JSON.stringify({ type: "offer", offer }));
+}
+
+// Change to the next user
+async function changeUser(direction) {
+    // Close the current peer connection
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+    }
+
+    // Stop the remote video stream
+    const otherWebcam = document.getElementById('other-webcam');
+    stopWebcam(otherWebcam);
+
+    // Notify the signaling server to switch to the next user
+    signalingSocket.send(JSON.stringify({ type: "change-user", direction }));
+
+    // Start a new random video call
+    randomVideoCall();
+}
+
+// Call randomVideoCall function when the page loads
+window.onload = async () => {
+    const userWebcam = document.getElementById('user-webcam');
+    await startWebcam(userWebcam);
+    randomVideoCall();
+};
+
+// Event listeners for "up" and "down" buttons
+document.getElementById('up-button').addEventListener('click', () => changeUser('up'));
+document.getElementById('down-button').addEventListener('click', () => changeUser('down'));
+    </script>
+</body>
+</html>
